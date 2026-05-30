@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { Redis } from "@upstash/redis";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   GOALS,
   getEmptyProgress,
@@ -10,36 +10,58 @@ import {
   type ProgressState,
 } from "@/lib/challenge";
 
-const STORE_KEY = "75-hard-progress";
+const STORE_KEY = "main";
+const TABLE_NAME = "challenge_progress";
 const LOCAL_DATA_PATH = path.join(process.cwd(), "data", "progress.json");
 
-function getRedisConfig() {
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+function getSupabaseConfig() {
+  const url = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !token) {
+  if (!url || !serviceRoleKey) {
     return null;
   }
 
-  return { url, token };
+  return { url, serviceRoleKey };
 }
 
-function getRedis() {
-  const config = getRedisConfig();
+function getSupabase() {
+  const config = getSupabaseConfig();
 
   if (!config) {
     return null;
   }
 
-  return new Redis(config);
+  return createClient(config.url, config.serviceRoleKey, {
+    auth: {
+      persistSession: false,
+    },
+  });
 }
 
-async function readFromRedis(redis: Redis) {
-  return (await redis.get<ProgressState>(STORE_KEY)) ?? getEmptyProgress();
+async function readFromSupabase(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from(TABLE_NAME)
+    .select("progress")
+    .eq("id", STORE_KEY)
+    .maybeSingle<{ progress: ProgressState }>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.progress ?? getEmptyProgress();
 }
 
-async function writeToRedis(redis: Redis, progress: ProgressState) {
-  await redis.set(STORE_KEY, progress);
+async function writeToSupabase(supabase: SupabaseClient, progress: ProgressState) {
+  const { error } = await supabase.from(TABLE_NAME).upsert({
+    id: STORE_KEY,
+    progress,
+  });
+
+  if (error) {
+    throw error;
+  }
 }
 
 async function readLocal() {
@@ -61,20 +83,20 @@ async function writeLocal(progress: ProgressState) {
 }
 
 export async function getProgress() {
-  const redis = getRedis();
+  const supabase = getSupabase();
 
-  if (redis) {
-    return readFromRedis(redis);
+  if (supabase) {
+    return readFromSupabase(supabase);
   }
 
   return readLocal();
 }
 
 export async function saveProgress(progress: ProgressState) {
-  const redis = getRedis();
+  const supabase = getSupabase();
 
-  if (redis) {
-    await writeToRedis(redis, progress);
+  if (supabase) {
+    await writeToSupabase(supabase, progress);
     return;
   }
 
