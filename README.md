@@ -1,6 +1,9 @@
-# 75 Hard Tracker
+# 75 Hard Command Center
 
-A shared 75 Hard tracker for you and Karthik, starting June 8, 2026.
+A shared 75 Hard tracker for Bisti and Karthik, starting June 8, 2026.
+Each person can pick their profile, check off their own daily goals, upload a
+daily proof photo, edit their own goal list, and see the other person's
+progress on the same calendar.
 
 ## Local Development
 
@@ -11,7 +14,7 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-Without Supabase environment variables, local progress is saved to
+Without Supabase environment variables, local app state is saved to
 `data/progress.json`.
 
 ## Deploying On Vercel
@@ -57,5 +60,8 @@ SUPABASE_SERVICE_ROLE_KEY=...
 Keep `SUPABASE_SERVICE_ROLE_KEY` secret. It is only used by the server API route
 and is not exposed to the browser.
 
-Once deployed, both of you can open the same Vercel URL and update the shared
-calendar.
+Daily proof photos are compressed in the browser and saved in the same Supabase
+table, so no extra storage bucket is required.
+
+Once deployed, both of you can open the same Vercel URL, choose your profile,
+and update the shared calendar.

@@ -1,21 +1,25 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   addDays,
+  getDefaultState,
   getChallengeDay,
-  GOALS,
-  isComplete,
+  getGoalsForPerson,
+  hasProof,
+  isDayComplete,
   PEOPLE,
   START_DATE,
   toDateKey,
   TOTAL_DAYS,
+  type AppState,
   type GoalId,
   type PersonId,
-  type ProgressState,
 } from "@/lib/challenge";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+const MAX_PROOF_PHOTO_LENGTH = 1_800_000;
 
 function formatDate(dateKey: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -25,8 +29,56 @@ function formatDate(dateKey: string) {
   }).format(new Date(`${dateKey}T12:00:00`));
 }
 
-function getPersonGoals(progress: ProgressState, dateKey: string, personId: PersonId) {
+function getPersonGoals(state: AppState, dateKey: string, personId: PersonId) {
+  const progress = state.progress;
   return progress[dateKey]?.[personId] ?? [];
+}
+
+function getProofPhoto(state: AppState, dateKey: string, personId: PersonId) {
+  return state.proofs[dateKey]?.[personId] ?? null;
+}
+
+function compressImage(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const image = new window.Image();
+
+      image.onload = () => {
+        const maxSide = 1200;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+
+        canvas.width = Math.round(image.width * scale);
+        canvas.height = Math.round(image.height * scale);
+
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+          reject(new Error("Could not prepare photo."));
+          return;
+        }
+
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+
+        if (dataUrl.length > MAX_PROOF_PHOTO_LENGTH) {
+          reject(new Error("Photo is too large."));
+          return;
+        }
+
+        resolve(dataUrl);
+      };
+
+      image.onerror = () => reject(new Error("Could not read photo."));
+      image.src = String(reader.result);
+    };
+
+    reader.onerror = () => reject(new Error("Could not load photo."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function subscribeToDateStore() {
@@ -41,8 +93,18 @@ function getServerDateKey() {
   return null;
 }
 
+function getSavedPerson() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const savedPerson = window.localStorage.getItem("75-hard-person") as PersonId | null;
+  return savedPerson && PEOPLE.some((person) => person.id === savedPerson) ? savedPerson : null;
+}
+
 export default function Home() {
-  const [progress, setProgress] = useState<ProgressState>({});
+  const [state, setState] = useState<AppState>(getDefaultState());
+  const [activePersonId, setActivePersonId] = useState<PersonId | null>(getSavedPerson);
   const todayKey = useSyncExternalStore(
     subscribeToDateStore,
     getBrowserDateKey,
@@ -66,20 +128,51 @@ export default function Home() {
     : START_DATE;
   const activeDate = selectedDate ?? defaultSelectedDate;
   const selectedDay = days.find((day) => day.dateKey === activeDate);
+  const activePerson = PEOPLE.find((person) => person.id === activePersonId);
+  const partner = PEOPLE.find((person) => person.id !== activePersonId);
+  const activePersonGoals = activePersonId ? getGoalsForPerson(state, activePersonId) : [];
+  const partnerGoals = partner ? getGoalsForPerson(state, partner.id) : [];
+  const bothCompleteDays = days.filter((day) =>
+    PEOPLE.every((person) => isDayComplete(state, day.dateKey, person.id)),
+  ).length;
+  const todayComplete = activePersonId
+    ? isDayComplete(state, activeDate, activePersonId)
+    : false;
 
   useEffect(() => {
     async function loadProgress() {
       const response = await fetch("/api/progress", { cache: "no-store" });
-      const data = (await response.json()) as { progress: ProgressState };
-      setProgress(data.progress);
+      const data = (await response.json()) as AppState;
+      setState(data);
     }
 
     loadProgress().catch(() => setSaveState("error"));
   }, []);
 
+  function choosePerson(personId: PersonId) {
+    setActivePersonId(personId);
+    window.localStorage.setItem("75-hard-person", personId);
+  }
+
+  function updateGoalDraft(personId: PersonId, goalId: GoalId, value: string) {
+    setState((current) => ({
+      ...current,
+      goals: {
+        ...current.goals,
+        [personId]: getGoalsForPerson(current, personId).map((currentGoal, index) =>
+          index === goalId ? value : currentGoal,
+        ),
+      },
+    }));
+  }
+
   async function toggleGoal(personId: PersonId, goalId: GoalId, checked: boolean) {
-    const previous = progress;
-    const day = previous[activeDate] ?? {};
+    if (personId !== activePersonId) {
+      return;
+    }
+
+    const previous = state;
+    const day = previous.progress[activeDate] ?? {};
     const goals = new Set(day[personId] ?? []);
 
     if (checked) {
@@ -88,47 +181,234 @@ export default function Home() {
       goals.delete(goalId);
     }
 
-    const nextProgress = {
+    const nextState = {
       ...previous,
-      [activeDate]: {
-        ...day,
-        [personId]: Array.from(goals).sort((a, b) => a - b),
+      progress: {
+        ...previous.progress,
+        [activeDate]: {
+          ...day,
+          [personId]: Array.from(goals).sort((a, b) => a - b),
+        },
       },
     };
 
-    setProgress(nextProgress);
+    setState(nextState);
     setSaveState("saving");
 
     try {
       const response = await fetch("/api/progress", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: activeDate, personId, goalId, checked }),
+        body: JSON.stringify({
+          type: "progress",
+          date: activeDate,
+          personId,
+          goalId,
+          checked,
+        }),
       });
 
       if (!response.ok) {
         throw new Error("Progress update failed");
       }
 
-      const data = (await response.json()) as { progress: ProgressState };
-      setProgress(data.progress);
+      const data = (await response.json()) as AppState;
+      setState(data);
       setSaveState("saved");
     } catch {
-      setProgress(previous);
+      setState(previous);
       setSaveState("error");
     }
   }
 
+  async function updateGoal(goalId: GoalId, value: string) {
+    if (!activePersonId) {
+      return;
+    }
+
+    const previous = state;
+    const nextGoals = getGoalsForPerson(previous, activePersonId).map((goal, index) =>
+      index === goalId ? value : goal,
+    );
+
+    setState({
+      ...previous,
+      goals: {
+        ...previous.goals,
+        [activePersonId]: nextGoals,
+      },
+    });
+
+    if (!value.trim()) {
+      setSaveState("error");
+      return;
+    }
+
+    setSaveState("saving");
+
+    try {
+      const response = await fetch("/api/progress", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "goals", personId: activePersonId, goals: nextGoals }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Goals update failed");
+      }
+
+      const data = (await response.json()) as AppState;
+      setState(data);
+      setSaveState("saved");
+    } catch {
+      setState(previous);
+      setSaveState("error");
+    }
+  }
+
+  async function saveProofPhoto(personId: PersonId, file: File | null) {
+    if (personId !== activePersonId || !file) {
+      return;
+    }
+
+    const previous = state;
+    setSaveState("saving");
+
+    try {
+      const dataUrl = await compressImage(file);
+      const nextState = {
+        ...previous,
+        proofs: {
+          ...previous.proofs,
+          [activeDate]: {
+            ...previous.proofs[activeDate],
+            [personId]: {
+              dataUrl,
+              uploadedAt: new Date().toISOString(),
+            },
+          },
+        },
+      };
+
+      setState(nextState);
+
+      const response = await fetch("/api/progress", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "proof",
+          date: activeDate,
+          personId,
+          dataUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Proof upload failed");
+      }
+
+      const data = (await response.json()) as AppState;
+      setState(data);
+      setSaveState("saved");
+    } catch {
+      setState(previous);
+      setSaveState("error");
+    }
+  }
+
+  async function removeProofPhoto(personId: PersonId) {
+    if (personId !== activePersonId) {
+      return;
+    }
+
+    const previous = state;
+    const dayProofs = previous.proofs[activeDate] ?? {};
+    const remainingProofs = { ...dayProofs };
+    delete remainingProofs[personId];
+    const nextState = {
+      ...previous,
+      proofs: {
+        ...previous.proofs,
+        [activeDate]: remainingProofs,
+      },
+    };
+
+    setState(nextState);
+    setSaveState("saving");
+
+    try {
+      const response = await fetch("/api/progress", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "proof",
+          date: activeDate,
+          personId,
+          dataUrl: null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Proof removal failed");
+      }
+
+      const data = (await response.json()) as AppState;
+      setState(data);
+      setSaveState("saved");
+    } catch {
+      setState(previous);
+      setSaveState("error");
+    }
+  }
+
+  if (!activePersonId) {
+    return (
+      <main className="welcome-shell">
+        <section className="welcome-card">
+          <p className="eyebrow">75 Hard starts June 8</p>
+          <h1>Who&apos;s checking in?</h1>
+          <p className="hero-copy">
+            Pick your profile once, then track your daily goals while keeping an eye on
+            each other&apos;s streak.
+          </p>
+
+          <div className="profile-picker">
+            {PEOPLE.map((person) => (
+              <button
+                className={`profile-card ${person.colorName}`}
+                key={person.id}
+                onClick={() => choosePerson(person.id)}
+                type="button"
+              >
+                <span className={`profile-orb ${person.colorName}`}>{person.emoji}</span>
+                <strong>{person.name}</strong>
+                <small>Enter dashboard</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="page-shell">
-      <section className="hero-card">
+      <section className={`hero-card hero-${activePerson?.colorName ?? "pink"}`}>
         <div>
-          <p className="eyebrow">Starting June 8, 2026</p>
-          <h1>75 Hard Tracker</h1>
+          <p className="eyebrow">Signed in as {activePerson?.name}</p>
+          <h1>75 Hard Command Center</h1>
           <p className="hero-copy">
-            A shared daily checklist for you and Karthik. Finish all five habits
-            to light up your color on the calendar.
+            Today&apos;s mission is simple: finish the list, light up your square,
+            and keep the team streak moving.
           </p>
+          <div className="hero-actions">
+            <button className="ghost-button" onClick={() => setActivePersonId(null)} type="button">
+              Switch profile
+            </button>
+            <button className="ghost-button" onClick={() => setSelectedDate(null)} type="button">
+              Jump to today
+            </button>
+          </div>
         </div>
         <div className="day-counter">
           <span>{challengeDay === 0 ? "Not started" : `Day ${challengeDay}`}</span>
@@ -140,11 +420,16 @@ export default function Home() {
       <section className="stats-grid">
         {PEOPLE.map((person) => {
           const completeDays = days.filter((day) =>
-            isComplete(getPersonGoals(progress, day.dateKey, person.id)),
+            isDayComplete(state, day.dateKey, person.id),
           ).length;
 
           return (
-            <article className={`stat-card ${person.colorName}`} key={person.id}>
+            <article
+              className={`stat-card ${person.colorName} ${
+                person.id === activePersonId ? "active-stat" : ""
+              }`}
+              key={person.id}
+            >
               <span>{person.name}</span>
               <strong>{completeDays}</strong>
               <small>completed days</small>
@@ -153,15 +438,7 @@ export default function Home() {
         })}
         <article className="stat-card together">
           <span>Together</span>
-          <strong>
-            {
-              days.filter((day) =>
-                PEOPLE.every((person) =>
-                  isComplete(getPersonGoals(progress, day.dateKey, person.id)),
-                ),
-              ).length
-            }
-          </strong>
+          <strong>{bothCompleteDays}</strong>
           <small>both completed</small>
         </article>
       </section>
@@ -175,7 +452,7 @@ export default function Home() {
             </div>
             <div className="legend">
               <span>
-                <i className="dot pink-dot" /> You
+                <i className="dot pink-dot" /> Bisti
               </span>
               <span>
                 <i className="dot blue-dot" /> Karthik
@@ -188,11 +465,9 @@ export default function Home() {
 
           <div className="calendar-grid">
             {days.map((day) => {
-              const youDone = isComplete(getPersonGoals(progress, day.dateKey, "you"));
-              const karthikDone = isComplete(
-                getPersonGoals(progress, day.dateKey, "karthik"),
-              );
-              const bothDone = youDone && karthikDone;
+              const bistiDone = isDayComplete(state, day.dateKey, "bisti");
+              const karthikDone = isDayComplete(state, day.dateKey, "karthik");
+              const bothDone = bistiDone && karthikDone;
 
               return (
                 <button
@@ -209,7 +484,7 @@ export default function Home() {
                   <span className="day-number">{day.dayNumber}</span>
                   <small>{formatDate(day.dateKey).replace(",", "")}</small>
                   <span className="day-markers">
-                    <i className={youDone ? "marker pink" : "marker empty"} />
+                    <i className={bistiDone ? "marker pink" : "marker empty"} />
                     <i className={karthikDone ? "marker blue" : "marker empty"} />
                   </span>
                 </button>
@@ -229,30 +504,100 @@ export default function Home() {
             <span className={`save-pill ${saveState}`}>{saveState}</span>
           </div>
 
+          <div className={`completion-banner ${todayComplete ? "complete" : ""}`}>
+            <span>{todayComplete ? "Locked in" : "In progress"}</span>
+            <strong>
+              {activePerson?.name}: {getPersonGoals(state, activeDate, activePersonId).length} /{" "}
+              {activePersonGoals.length} goals ·{" "}
+              {hasProof(state, activeDate, activePersonId) ? "proof added" : "proof needed"}
+            </strong>
+            {partner ? (
+              <small>
+                {partner.name}: {getPersonGoals(state, activeDate, partner.id).length} /{" "}
+                {partnerGoals.length} goals ·{" "}
+                {hasProof(state, activeDate, partner.id) ? "proof added" : "proof needed"}
+              </small>
+            ) : null}
+          </div>
+
           <div className="people-checklists">
             {PEOPLE.map((person) => {
-              const goals = getPersonGoals(progress, activeDate, person.id);
+              const goals = getPersonGoals(state, activeDate, person.id);
+              const personGoalList = getGoalsForPerson(state, person.id);
+              const canEdit = person.id === activePersonId;
+              const proof = getProofPhoto(state, activeDate, person.id);
 
               return (
-                <section className="person-panel" key={person.id}>
+                <section className={`person-panel ${canEdit ? "editable" : "readonly"}`} key={person.id}>
                   <div className="person-heading">
                     <span className={`avatar ${person.colorName}`}>
-                      {person.name.slice(0, 1)}
+                      {person.emoji}
                     </span>
                     <div>
                       <h3>{person.name}</h3>
-                      <p>{goals.length} of 5 complete</p>
+                      <p>{canEdit ? "Your check-in" : "Partner view"} · {goals.length} of {personGoalList.length}</p>
                     </div>
                   </div>
 
+                  <div className={`proof-card ${proof ? "has-proof" : ""}`}>
+                    <div className="proof-copy">
+                      <span>Proof photo</span>
+                      <strong>{proof ? "Photo attached" : "Required to complete the day"}</strong>
+                      <small>
+                        {proof
+                          ? `Uploaded ${formatDate(proof.uploadedAt.slice(0, 10))}`
+                          : "Add a progress photo after finishing your goals."}
+                      </small>
+                    </div>
+
+                    {proof ? (
+                      <Image
+                        alt={`${person.name} proof for ${formatDate(activeDate)}`}
+                        className="proof-image"
+                        height={360}
+                        unoptimized
+                        src={proof.dataUrl}
+                        width={480}
+                      />
+                    ) : (
+                      <div className="proof-placeholder">No proof yet</div>
+                    )}
+
+                    {canEdit ? (
+                      <div className="proof-actions">
+                        <label className="proof-upload-button">
+                          {proof ? "Replace photo" : "Upload proof"}
+                          <input
+                            accept="image/*"
+                            onChange={(event) => {
+                              saveProofPhoto(person.id, event.target.files?.[0] ?? null);
+                              event.target.value = "";
+                            }}
+                            type="file"
+                          />
+                        </label>
+                        {proof ? (
+                          <button
+                            className="proof-remove-button"
+                            onClick={() => removeProofPhoto(person.id)}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
                   <div className="goal-list">
-                    {GOALS.map((goal, goalId) => {
+                    {personGoalList.map((goal, goalId) => {
                       const checked = goals.includes(goalId);
 
                       return (
-                        <label className="goal-row" key={goal}>
+                        <label className="goal-row" key={`${person.id}-goal-${goalId}`}>
                           <input
                             checked={checked}
+                            disabled={!canEdit}
                             onChange={(event) =>
                               toggleGoal(person.id, goalId, event.target.checked)
                             }
@@ -268,6 +613,29 @@ export default function Home() {
             })}
           </div>
         </aside>
+      </section>
+
+      <section className="goals-editor-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Challenge Rules</p>
+            <h2>Edit {activePerson?.name}&apos;s five goals</h2>
+          </div>
+          <p className="editor-note">Changes only affect this profile.</p>
+        </div>
+
+        <div className="editable-goals-grid">
+          {activePersonGoals.map((goal, goalId) => (
+            <label className="editable-goal" key={`${activePersonId}-editor-${goalId}`}>
+              <span>Goal {goalId + 1}</span>
+              <input
+                onBlur={(event) => updateGoal(goalId, event.target.value)}
+                onChange={(event) => updateGoalDraft(activePersonId, goalId, event.target.value)}
+                value={goal}
+              />
+            </label>
+          ))}
+        </div>
       </section>
     </main>
   );

@@ -2,12 +2,13 @@ import { promises as fs } from "fs";
 import path from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
-  GOALS,
-  getEmptyProgress,
+  DEFAULT_GOALS,
+  getDefaultState,
+  normalizeState,
   PEOPLE,
+  type AppState,
   type GoalId,
   type PersonId,
-  type ProgressState,
 } from "@/lib/challenge";
 
 const STORE_KEY = "main";
@@ -44,19 +45,19 @@ async function readFromSupabase(supabase: SupabaseClient) {
     .from(TABLE_NAME)
     .select("progress")
     .eq("id", STORE_KEY)
-    .maybeSingle<{ progress: ProgressState }>();
+    .maybeSingle<{ progress: unknown }>();
 
   if (error) {
     throw error;
   }
 
-  return data?.progress ?? getEmptyProgress();
+  return normalizeState(data?.progress);
 }
 
-async function writeToSupabase(supabase: SupabaseClient, progress: ProgressState) {
+async function writeToSupabase(supabase: SupabaseClient, state: AppState) {
   const { error } = await supabase.from(TABLE_NAME).upsert({
     id: STORE_KEY,
-    progress,
+    progress: state,
   });
 
   if (error) {
@@ -67,19 +68,19 @@ async function writeToSupabase(supabase: SupabaseClient, progress: ProgressState
 async function readLocal() {
   try {
     const raw = await fs.readFile(LOCAL_DATA_PATH, "utf8");
-    return JSON.parse(raw) as ProgressState;
+    return normalizeState(JSON.parse(raw));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return getEmptyProgress();
+      return getDefaultState();
     }
 
     throw error;
   }
 }
 
-async function writeLocal(progress: ProgressState) {
+async function writeLocal(state: AppState) {
   await fs.mkdir(path.dirname(LOCAL_DATA_PATH), { recursive: true });
-  await fs.writeFile(LOCAL_DATA_PATH, JSON.stringify(progress, null, 2));
+  await fs.writeFile(LOCAL_DATA_PATH, JSON.stringify(state, null, 2));
 }
 
 export async function getProgress() {
@@ -92,15 +93,15 @@ export async function getProgress() {
   return readLocal();
 }
 
-export async function saveProgress(progress: ProgressState) {
+export async function saveProgress(state: AppState) {
   const supabase = getSupabase();
 
   if (supabase) {
-    await writeToSupabase(supabase, progress);
+    await writeToSupabase(supabase, state);
     return;
   }
 
-  await writeLocal(progress);
+  await writeLocal(state);
 }
 
 export function isPersonId(value: unknown): value is PersonId {
@@ -108,5 +109,5 @@ export function isPersonId(value: unknown): value is PersonId {
 }
 
 export function isGoalId(value: unknown): value is GoalId {
-  return Number.isInteger(value) && Number(value) >= 0 && Number(value) < GOALS.length;
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) < DEFAULT_GOALS.length;
 }
