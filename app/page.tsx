@@ -20,6 +20,8 @@ import {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 const MAX_PROOF_PHOTO_LENGTH = 1_800_000;
+const PERSON_STORAGE_KEY = "75-hard-person";
+const PERSON_STORAGE_EVENT = "75-hard-person-change";
 
 function formatDate(dateKey: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -98,13 +100,39 @@ function getSavedPerson() {
     return null;
   }
 
-  const savedPerson = window.localStorage.getItem("75-hard-person") as PersonId | null;
+  const savedPerson = window.localStorage.getItem(PERSON_STORAGE_KEY) as PersonId | null;
   return savedPerson && PEOPLE.some((person) => person.id === savedPerson) ? savedPerson : null;
+}
+
+function subscribeToPersonStore(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener(PERSON_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener(PERSON_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+function getServerSavedPerson() {
+  return null;
+}
+
+function notifyPersonStore() {
+  window.dispatchEvent(new Event(PERSON_STORAGE_EVENT));
 }
 
 export default function Home() {
   const [state, setState] = useState<AppState>(getDefaultState());
-  const [activePersonId, setActivePersonId] = useState<PersonId | null>(getSavedPerson);
+  const activePersonId = useSyncExternalStore(
+    subscribeToPersonStore,
+    getSavedPerson,
+    getServerSavedPerson,
+  );
   const todayKey = useSyncExternalStore(
     subscribeToDateStore,
     getBrowserDateKey,
@@ -150,8 +178,13 @@ export default function Home() {
   }, []);
 
   function choosePerson(personId: PersonId) {
-    setActivePersonId(personId);
-    window.localStorage.setItem("75-hard-person", personId);
+    window.localStorage.setItem(PERSON_STORAGE_KEY, personId);
+    notifyPersonStore();
+  }
+
+  function switchProfile() {
+    window.localStorage.removeItem(PERSON_STORAGE_KEY);
+    notifyPersonStore();
   }
 
   function updateGoalDraft(personId: PersonId, goalId: GoalId, value: string) {
@@ -402,7 +435,7 @@ export default function Home() {
             and keep the team streak moving.
           </p>
           <div className="hero-actions">
-            <button className="ghost-button" onClick={() => setActivePersonId(null)} type="button">
+            <button className="ghost-button" onClick={switchProfile} type="button">
               Switch profile
             </button>
             <button className="ghost-button" onClick={() => setSelectedDate(null)} type="button">
