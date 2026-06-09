@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { DEFAULT_GOALS } from "@/lib/challenge";
+import { DEFAULT_GOALS, getGoalsForPerson, isComplete } from "@/lib/challenge";
 import { getProgress, isGoalId, isPersonId, saveProgress } from "@/lib/progress-store";
 
 export const dynamic = "force-dynamic";
@@ -106,6 +106,25 @@ export async function PATCH(request: Request) {
     ...day,
     [body.personId]: Array.from(currentGoals).sort((a, b) => a - b),
   };
+
+  const isNowComplete = isComplete(
+    state.progress[body.date][body.personId],
+    getGoalsForPerson(state, body.personId).length,
+  );
+  const dayCompletions = state.completedAt[body.date] ?? {};
+
+  if (isNowComplete && !dayCompletions[body.personId]) {
+    state.completedAt[body.date] = {
+      ...dayCompletions,
+      [body.personId]: new Date().toISOString(),
+    };
+  }
+
+  if (!isNowComplete && dayCompletions[body.personId]) {
+    const remainingCompletions = { ...dayCompletions };
+    delete remainingCompletions[body.personId];
+    state.completedAt[body.date] = remainingCompletions;
+  }
 
   await saveProgress(state);
 

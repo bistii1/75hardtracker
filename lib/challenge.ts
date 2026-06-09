@@ -36,10 +36,12 @@ export type ProofPhoto = {
 };
 export type ProofState = Record<string, Partial<Record<PersonId, ProofPhoto>>>;
 export type GoalsState = Record<PersonId, string[]>;
+export type CompletionState = Record<string, Partial<Record<PersonId, string>>>;
 export type AppState = {
   goals: GoalsState;
   progress: ProgressState;
   proofs: ProofState;
+  completedAt: CompletionState;
 };
 
 function dateKeyParts(dateKey: string) {
@@ -101,6 +103,20 @@ export function isDayComplete(
   return isComplete(state.progress[dateKey]?.[personId], getGoalsForPerson(state, personId).length);
 }
 
+export function getDayWinner(state: AppState, dateKey: string) {
+  const completedPeople = PEOPLE.map((person) => ({
+    personId: person.id,
+    completedAt: state.completedAt[dateKey]?.[person.id],
+  })).filter(
+    (entry): entry is { personId: PersonId; completedAt: string } =>
+      Boolean(entry.completedAt) && isDayComplete(state, dateKey, entry.personId),
+  );
+
+  return completedPeople.sort(
+    (a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime(),
+  )[0]?.personId;
+}
+
 export function getDefaultState(): AppState {
   return {
     goals: {
@@ -109,6 +125,7 @@ export function getDefaultState(): AppState {
     },
     progress: {},
     proofs: {},
+    completedAt: {},
   };
 }
 
@@ -128,10 +145,15 @@ export function normalizeState(value: unknown): AppState {
     maybeState.proofs && typeof maybeState.proofs === "object"
       ? (maybeState.proofs as Record<string, unknown>)
       : {};
+  const rawCompletedAt =
+    maybeState.completedAt && typeof maybeState.completedAt === "object"
+      ? (maybeState.completedAt as Record<string, unknown>)
+      : {};
   const goals = normalizeGoals(maybeState.goals, fallback.goals);
 
   const progress: ProgressState = {};
   const proofs: ProofState = {};
+  const completedAt: CompletionState = {};
 
   for (const [dateKey, day] of Object.entries(rawProgress)) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !day || typeof day !== "object") {
@@ -184,10 +206,30 @@ export function normalizeState(value: unknown): AppState {
     }
   }
 
+  for (const [dateKey, day] of Object.entries(rawCompletedAt)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !day || typeof day !== "object") {
+      continue;
+    }
+
+    const dayCompletions = day as Record<string, unknown>;
+
+    for (const person of PEOPLE) {
+      const completionTime = dayCompletions[person.id];
+
+      if (typeof completionTime === "string") {
+        completedAt[dateKey] = {
+          ...completedAt[dateKey],
+          [person.id]: completionTime,
+        };
+      }
+    }
+  }
+
   return {
     goals,
     progress,
     proofs,
+    completedAt,
   };
 }
 

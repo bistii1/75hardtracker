@@ -398,6 +398,49 @@ h3 {
   padding: 8px 10px;
 }
 
+.calendar-range {
+  color: var(--muted);
+  font-weight: 800;
+  margin: 6px 0 0;
+}
+
+.calendar-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.calendar-view-toggle,
+.calendar-stepper {
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.calendar-view-toggle button,
+.calendar-stepper button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 900;
+  padding: 9px 12px;
+  text-transform: capitalize;
+}
+
+.calendar-view-toggle button.active,
+.calendar-stepper button:hover {
+  background: var(--ink);
+  color: white;
+}
+
 .dot,
 .marker {
   border-radius: 999px;
@@ -464,6 +507,14 @@ h3 {
   background: linear-gradient(145deg, var(--both-soft), rgba(255, 255, 255, 0.88));
 }
 
+.calendar-day.winner-pink:not(.both-complete) {
+  background: linear-gradient(145deg, var(--pink-soft), rgba(255, 255, 255, 0.9));
+}
+
+.calendar-day.winner-blue:not(.both-complete) {
+  background: linear-gradient(145deg, var(--blue-soft), rgba(255, 255, 255, 0.9));
+}
+
 .day-number {
   display: block;
   font-size: 1.35rem;
@@ -482,6 +533,25 @@ h3 {
 .day-markers {
   display: flex;
   gap: 6px;
+}
+
+.winner-badge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.66rem;
+  font-weight: 950;
+  margin-top: 8px;
+  padding: 5px 7px;
+}
+
+.winner-badge.pink {
+  background: var(--pink);
+  color: white;
+}
+
+.winner-badge.blue {
+  background: var(--blue);
+  color: white;
 }
 
 .marker {
@@ -768,6 +838,54 @@ h3 {
 .editable-goal input:focus {
   border-color: rgba(36, 31, 26, 0.38);
   outline: 3px solid rgba(124, 92, 255, 0.14);
+}
+
+.confetti-layer {
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+}
+
+.confetti-layer i {
+  animation: confetti-fall 1200ms ease-out forwards;
+  background: var(--strava);
+  border-radius: 4px;
+  height: 14px;
+  opacity: 0;
+  position: absolute;
+  top: -20px;
+  transform: rotate(0deg);
+  width: 8px;
+}
+
+.confetti-layer i:nth-child(3n) {
+  background: var(--pink);
+}
+
+.confetti-layer i:nth-child(3n + 1) {
+  background: var(--blue);
+}
+
+.confetti-layer i:nth-child(4n) {
+  background: var(--both);
+}
+
+@keyframes confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -20px, 0) rotate(0deg);
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift), 105vh, 0) rotate(720deg);
+  }
 }
 
 @media (max-width: 920px) {

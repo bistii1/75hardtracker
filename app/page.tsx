@@ -1,11 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   addDays,
   getDefaultState,
   getChallengeDay,
+  getDayWinner,
   getGoalsForPerson,
   isDayComplete,
   PEOPLE,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/challenge";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+type CalendarView = "week" | "month" | "all";
 const MAX_PROOF_PHOTO_LENGTH = 1_800_000;
 const PERSON_STORAGE_KEY = "75-hard-person";
 const PERSON_STORAGE_EVENT = "75-hard-person-change";
@@ -139,6 +142,8 @@ export default function Home() {
   );
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [calendarView, setCalendarView] = useState<CalendarView>("week");
+  const [confettiRun, setConfettiRun] = useState(0);
 
   const days = useMemo(
     () =>
@@ -165,6 +170,32 @@ export default function Home() {
   const todayComplete = activePersonId
     ? isDayComplete(state, activeDate, activePersonId)
     : false;
+  const activeDayIndex = Math.max(
+    days.findIndex((day) => day.dateKey === activeDate),
+    0,
+  );
+  const visibleDays = useMemo(() => {
+    if (calendarView === "all") {
+      return days;
+    }
+
+    if (calendarView === "week") {
+      const weekStart = Math.floor(activeDayIndex / 7) * 7;
+      return days.slice(weekStart, weekStart + 7);
+    }
+
+    const activeMonth = activeDate.slice(0, 7);
+    return days.filter((day) => day.dateKey.startsWith(activeMonth));
+  }, [activeDate, activeDayIndex, calendarView, days]);
+  const calendarRangeLabel =
+    calendarView === "all"
+      ? "All 75 days"
+      : calendarView === "week"
+        ? `Days ${visibleDays[0]?.dayNumber ?? 1}-${visibleDays.at(-1)?.dayNumber ?? 1}`
+        : new Intl.DateTimeFormat("en-US", {
+            month: "long",
+            year: "numeric",
+          }).format(new Date(`${activeDate}T12:00:00`));
 
   useEffect(() => {
     async function loadProgress() {
@@ -198,6 +229,16 @@ export default function Home() {
     }));
   }
 
+  function triggerConfetti() {
+    setConfettiRun((current) => current + 1);
+  }
+
+  function shiftCalendar(direction: -1 | 1) {
+    const step = calendarView === "month" ? 30 : 7;
+    const nextIndex = Math.min(Math.max(activeDayIndex + direction * step, 0), days.length - 1);
+    setSelectedDate(days[nextIndex].dateKey);
+  }
+
   async function toggleGoal(personId: PersonId, goalId: GoalId, checked: boolean) {
     if (personId !== activePersonId) {
       return;
@@ -223,8 +264,13 @@ export default function Home() {
         },
       },
     };
+    const wasComplete = isDayComplete(previous, activeDate, personId);
+    const isNowComplete = isDayComplete(nextState, activeDate, personId);
 
     setState(nextState);
+    if (!wasComplete && isNowComplete) {
+      triggerConfetti();
+    }
     setSaveState("saving");
 
     try {
@@ -425,6 +471,23 @@ export default function Home() {
 
   return (
     <main className="page-shell">
+      {confettiRun > 0 ? (
+        <div className="confetti-layer" key={confettiRun} aria-hidden="true">
+          {Array.from({ length: 28 }, (_, index) => (
+            <i
+              key={index}
+              style={
+                {
+                  "--drift": `${(index - 14) * 6}px`,
+                  animationDelay: `${(index % 8) * 35}ms`,
+                  left: `${(index * 37) % 100}%`,
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+
       <section className={`hero-card hero-${activePerson?.colorName ?? "pink"}`}>
         <div>
           <p className="eyebrow">Signed in as {activePerson?.name}</p>
@@ -481,6 +544,7 @@ export default function Home() {
             <div>
               <p className="eyebrow">Shared Calendar</p>
               <h2>Challenge Days</h2>
+              <p className="calendar-range">{calendarRangeLabel}</p>
             </div>
             <div className="legend">
               <span>
@@ -495,11 +559,38 @@ export default function Home() {
             </div>
           </div>
 
+          <div className="calendar-toolbar">
+            <div className="calendar-view-toggle" aria-label="Calendar view">
+              {(["week", "month", "all"] as const).map((view) => (
+                <button
+                  className={calendarView === view ? "active" : ""}
+                  key={view}
+                  onClick={() => setCalendarView(view)}
+                  type="button"
+                >
+                  {view}
+                </button>
+              ))}
+            </div>
+            {calendarView !== "all" ? (
+              <div className="calendar-stepper">
+                <button onClick={() => shiftCalendar(-1)} type="button">
+                  Prev
+                </button>
+                <button onClick={() => shiftCalendar(1)} type="button">
+                  Next
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           <div className="calendar-grid">
-            {days.map((day) => {
+            {visibleDays.map((day) => {
               const bistiDone = isDayComplete(state, day.dateKey, "bisti");
               const karthikDone = isDayComplete(state, day.dateKey, "karthik");
               const bothDone = bistiDone && karthikDone;
+              const winnerId = getDayWinner(state, day.dateKey);
+              const winner = PEOPLE.find((person) => person.id === winnerId);
 
               return (
                 <button
@@ -508,6 +599,7 @@ export default function Home() {
                     day.dateKey === activeDate ? "selected" : "",
                     day.dateKey === todayKey ? "today" : "",
                     bothDone ? "both-complete" : "",
+                    winner ? `winner-${winner.colorName}` : "",
                   ].join(" ")}
                   key={day.dateKey}
                   onClick={() => setSelectedDate(day.dateKey)}
@@ -519,6 +611,11 @@ export default function Home() {
                     <i className={bistiDone ? "marker pink" : "marker empty"} />
                     <i className={karthikDone ? "marker blue" : "marker empty"} />
                   </span>
+                  {winner ? (
+                    <span className={`winner-badge ${winner.colorName}`}>
+                      {winner.name} won
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
