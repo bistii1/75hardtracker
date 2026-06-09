@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   addDays,
   getDefaultState,
@@ -197,15 +197,37 @@ export default function Home() {
             year: "numeric",
           }).format(new Date(`${activeDate}T12:00:00`));
 
+  const refreshProgress = useCallback(async () => {
+    const response = await fetch("/api/progress", { cache: "no-store" });
+    const data = (await response.json()) as AppState;
+    setState(data);
+  }, []);
+
   useEffect(() => {
-    async function loadProgress() {
-      const response = await fetch("/api/progress", { cache: "no-store" });
-      const data = (await response.json()) as AppState;
-      setState(data);
+    function refreshWhenVisible() {
+      if (document.visibilityState === "visible") {
+        refreshProgress().catch(() => setSaveState("error"));
+      }
     }
 
-    loadProgress().catch(() => setSaveState("error"));
-  }, []);
+    const initialRefresh = window.setTimeout(() => {
+      refreshProgress().catch(() => setSaveState("error"));
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      refreshWhenVisible();
+    }, 10_000);
+
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refreshProgress]);
 
   function choosePerson(personId: PersonId) {
     window.localStorage.setItem(PERSON_STORAGE_KEY, personId);
@@ -263,9 +285,23 @@ export default function Home() {
           [personId]: Array.from(goals).sort((a, b) => a - b),
         },
       },
+      completedAt: {
+        ...previous.completedAt,
+      },
     };
     const wasComplete = isDayComplete(previous, activeDate, personId);
     const isNowComplete = isDayComplete(nextState, activeDate, personId);
+
+    if (isNowComplete) {
+      nextState.completedAt[activeDate] = {
+        ...previous.completedAt[activeDate],
+        [personId]: previous.completedAt[activeDate]?.[personId] ?? new Date().toISOString(),
+      };
+    } else {
+      const remainingCompletions = { ...(previous.completedAt[activeDate] ?? {}) };
+      delete remainingCompletions[personId];
+      nextState.completedAt[activeDate] = remainingCompletions;
+    }
 
     setState(nextState);
     if (!wasComplete && isNowComplete) {
@@ -582,6 +618,13 @@ export default function Home() {
                 </button>
               </div>
             ) : null}
+            <button
+              className="calendar-refresh"
+              onClick={() => refreshProgress().catch(() => setSaveState("error"))}
+              type="button"
+            >
+              Refresh
+            </button>
           </div>
 
           <div className="calendar-grid">

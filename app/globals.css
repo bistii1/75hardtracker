@@ -410,20 +410,27 @@ h3 {
   gap: 12px;
   justify-content: space-between;
   margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.calendar-view-toggle,
+.calendar-stepper,
+.calendar-refresh {
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
 }
 
 .calendar-view-toggle,
 .calendar-stepper {
-  background: rgba(255, 255, 255, 0.66);
-  border: 1px solid var(--card-border);
-  border-radius: 999px;
   display: flex;
   gap: 4px;
   padding: 4px;
 }
 
 .calendar-view-toggle button,
-.calendar-stepper button {
+.calendar-stepper button,
+.calendar-refresh {
   background: transparent;
   border: 0;
   border-radius: 999px;
@@ -439,6 +446,10 @@ h3 {
 .calendar-stepper button:hover {
   background: var(--ink);
   color: white;
+}
+
+.calendar-refresh {
+  padding: 13px 14px;
 }
 
 .dot,
