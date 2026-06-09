@@ -1,8 +1,8 @@
 # 75 Hard Command Center
 
 A shared 75 Hard tracker for Bisti and Karthik, starting June 8, 2026.
-Each person can pick their profile, check off their own daily goals, upload a
-daily proof photo, edit their own goal list, and see the other person's
+Each person can pick their profile, check off their own daily goals, optionally
+upload a daily photo, edit their own goal list, and see the other person's
 progress on the same calendar.
 
 ## Local Development
@@ -60,8 +60,8 @@ SUPABASE_SERVICE_ROLE_KEY=...
 Keep `SUPABASE_SERVICE_ROLE_KEY` secret. It is only used by the server API route
 and is not exposed to the browser.
 
-Daily proof photos are compressed in the browser and saved in the same Supabase
-table, so no extra storage bucket is required.
+Optional daily photos are compressed in the browser and saved in the same
+Supabase table, so no extra storage bucket is required.
 
 Once deployed, both of you can open the same Vercel URL, choose your profile,
 and update the shared calendar.

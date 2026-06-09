@@ -7,7 +7,6 @@ import {
   getDefaultState,
   getChallengeDay,
   getGoalsForPerson,
-  hasProof,
   isDayComplete,
   PEOPLE,
   START_DATE,
@@ -541,14 +540,12 @@ export default function Home() {
             <span>{todayComplete ? "Locked in" : "In progress"}</span>
             <strong>
               {activePerson?.name}: {getPersonGoals(state, activeDate, activePersonId).length} /{" "}
-              {activePersonGoals.length} goals ·{" "}
-              {hasProof(state, activeDate, activePersonId) ? "proof added" : "proof needed"}
+              {activePersonGoals.length} goals complete
             </strong>
             {partner ? (
               <small>
                 {partner.name}: {getPersonGoals(state, activeDate, partner.id).length} /{" "}
-                {partnerGoals.length} goals ·{" "}
-                {hasProof(state, activeDate, partner.id) ? "proof added" : "proof needed"}
+                {partnerGoals.length} goals complete
               </small>
             ) : null}
           </div>
@@ -574,12 +571,12 @@ export default function Home() {
 
                   <div className={`proof-card ${proof ? "has-proof" : ""}`}>
                     <div className="proof-copy">
-                      <span>Proof photo</span>
-                      <strong>{proof ? "Photo attached" : "Required to complete the day"}</strong>
+                      <span>Optional photo</span>
+                      <strong>{proof ? "Photo attached" : "No photo needed"}</strong>
                       <small>
                         {proof
                           ? `Uploaded ${formatDate(proof.uploadedAt.slice(0, 10))}`
-                          : "Add a progress photo after finishing your goals."}
+                          : "Add one if you want a visual memory for the day."}
                       </small>
                     </div>
 
@@ -652,7 +649,7 @@ export default function Home() {
         <div className="section-heading">
           <div>
             <p className="eyebrow">Challenge Rules</p>
-            <h2>Edit {activePerson?.name}&apos;s five goals</h2>
+            <h2>Edit {activePerson?.name}&apos;s goals</h2>
           </div>
           <p className="editor-note">Changes only affect this profile.</p>
         </div>

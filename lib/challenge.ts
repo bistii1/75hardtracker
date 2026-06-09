@@ -21,8 +21,9 @@ export const DEFAULT_GOALS = [
   "1 hour of exercise",
   "Drank at least 4 water bottles",
   "Read 10 pages of nonfiction",
-  "Took daily progress pictures",
 ] as const;
+
+const REMOVED_GOALS = new Set(["Took daily progress pictures", "Completed a daily check-in"]);
 
 export type PersonId = (typeof PEOPLE)[number]["id"];
 export type GoalId = number;
@@ -80,7 +81,8 @@ export function getChallengeDay(dateKey = toDateKey(new Date())) {
 }
 
 export function isComplete(goals: GoalId[] | undefined, goalCount: number) {
-  return goals?.length === goalCount;
+  const validGoals = new Set((goals ?? []).filter((goal) => goal >= 0 && goal < goalCount));
+  return validGoals.size === goalCount;
 }
 
 export function getGoalsForPerson(state: AppState, personId: PersonId) {
@@ -96,10 +98,7 @@ export function isDayComplete(
   dateKey: string,
   personId: PersonId,
 ) {
-  return (
-    isComplete(state.progress[dateKey]?.[personId], getGoalsForPerson(state, personId).length) &&
-    hasProof(state, dateKey, personId)
-  );
+  return isComplete(state.progress[dateKey]?.[personId], getGoalsForPerson(state, personId).length);
 }
 
 export function getDefaultState(): AppState {
@@ -148,8 +147,8 @@ export function normalizeState(value: unknown): AppState {
     const karthikGoals = Array.isArray(dayProgress.karthik) ? dayProgress.karthik : [];
 
     progress[dateKey] = {
-      bisti: bistiGoals.filter(Number.isInteger) as GoalId[],
-      karthik: karthikGoals.filter(Number.isInteger) as GoalId[],
+      bisti: normalizeCompletedGoals(bistiGoals, goals.bisti.length),
+      karthik: normalizeCompletedGoals(karthikGoals, goals.karthik.length),
     };
   }
 
@@ -195,8 +194,8 @@ export function normalizeState(value: unknown): AppState {
 function normalizeGoals(value: unknown, fallback: GoalsState): GoalsState {
   if (Array.isArray(value) && value.every((goal) => typeof goal === "string")) {
     return {
-      bisti: value,
-      karthik: value,
+      bisti: normalizeGoalList(value),
+      karthik: normalizeGoalList(value),
     };
   }
 
@@ -210,12 +209,26 @@ function normalizeGoals(value: unknown, fallback: GoalsState): GoalsState {
     bisti:
       Array.isArray(possibleGoals.bisti) &&
       possibleGoals.bisti.every((goal) => typeof goal === "string")
-        ? possibleGoals.bisti
+        ? normalizeGoalList(possibleGoals.bisti)
         : fallback.bisti,
     karthik:
       Array.isArray(possibleGoals.karthik) &&
       possibleGoals.karthik.every((goal) => typeof goal === "string")
-        ? possibleGoals.karthik
+        ? normalizeGoalList(possibleGoals.karthik)
         : fallback.karthik,
   };
+}
+
+function normalizeGoalList(goals: string[]) {
+  return goals.filter((goal) => !REMOVED_GOALS.has(goal));
+}
+
+function normalizeCompletedGoals(goals: unknown[], goalCount: number) {
+  return Array.from(
+    new Set(
+      goals.filter(
+        (goal): goal is GoalId => Number.isInteger(goal) && Number(goal) >= 0 && Number(goal) < goalCount,
+      ),
+    ),
+  ).sort((a, b) => a - b);
 }
